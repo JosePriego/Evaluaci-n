@@ -10,7 +10,6 @@ def obtener_datos_openalex(doi):
         res = requests.get(url, timeout=10)
         if res.status_code == 200:
             d = res.json()
-            # Extraemos citas y FWCI de OpenAlex
             return d.get('cited_by_count', 0), d.get('fwci', 'N/A')
     except: pass
     return "N/A", "N/A"
@@ -32,7 +31,6 @@ def obtener_datos_scopus(doi):
         return None, "Falta_Clave"
 
     headers = {"X-ELS-APIKey": api_key, "Accept": "application/json"}
-    # Búsqueda exacta por DOI para evitar resultados irrelevantes
     url = f"https://api.elsevier.com/content/search/scopus?query=DOI({doi})"
     
     try:
@@ -56,7 +54,7 @@ def obtener_datos_scopus(doi):
             "permisos_revista": True
         }
 
-        # Extracción de SJR y CiteScore si hay ISSN
+        # Según el manual FECYT: Serial Title API + view=ENHANCED
         if issn:
             issn_l = str(issn).replace("-", "").strip()
             url_rev = f"https://api.elsevier.com/content/serial/title/issn/{issn_l}?view=ENHANCED"
@@ -85,28 +83,22 @@ if st.button("Analizar Impacto"):
     
     st.divider()
     
-    # 1. Bloque de Datos (Métricas de Citación)
     st.subheader("📊 Impacto de la Aportación")
-    
     c_oa, f_oa = obtener_datos_openalex(doi_l)
     c_di, f_di = obtener_datos_dimensions(doi_l)
     dat_sco, stat_sco = obtener_datos_scopus(doi_l)
     
     col1, col2, col3 = st.columns(3)
-    
     with col1:
         st.metric("Citas OpenAlex", c_oa)
         st.caption(f"FWCI: {f_oa}")
-        
     with col2:
         st.metric("Citas Scopus", dat_sco['citas'] if stat_sco == 200 else "N/A")
         st.caption(f"Año: {dat_sco['año'] if stat_sco == 200 else '-'}")
-        
     with col3:
         st.metric("Citas Dimensions", c_di)
         st.caption(f"FCR: {f_di}")
 
-    # 2. Bloque de Revista
     st.divider()
     st.subheader("🏢 Calidad de la Revista (Scopus)")
     if stat_sco == 200:
@@ -115,17 +107,14 @@ if st.button("Analizar Impacto"):
             m1.metric(f"SJR ({dat_sco['año']})", dat_sco['sjr'])
             m2.metric(f"CiteScore ({dat_sco['año']})", dat_sco['cs'])
         else:
-            st.warning("🔒 Licencia limitada para métricas de revista.")
+            st.warning("🔒 Acceso limitado a la Serial Title API (Manual FECYT p.10).")
     else:
         st.error("No se han podido recuperar datos de Scopus.")
 
-    # 3. Enlaces Externos
     st.divider()
     st.write("### Enlaces de consulta")
-    
-    # URL de búsqueda exacta en Scopus para consultar el FWCI manualmente
     doi_query = urllib.parse.quote(f'DOI("{doi_l}")')
     url_scopus = f"https://www.scopus.com/results/results.uri?txtSearch={doi_query}&src=s&st1={doi_query}"
     
-    st.markdown(f"🔗 [Consultar FWCI y detalles en Scopus]({url_scopus})")
+    st.markdown(f"🔗 [Consultar FWCI y métricas en Scopus.com]({url_scopus})")
     st.markdown(f"🔗 [Ver web original del artículo (DOI.org)](https://doi.org/{doi_l})")
