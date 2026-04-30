@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import urllib.parse
 
 # --- FUNCIONES DE EXTRACCIÓN ---
 
@@ -9,9 +10,10 @@ def obtener_datos_openalex(doi):
         res = requests.get(url, timeout=10)
         if res.status_code == 200:
             d = res.json()
+            # Extraemos citas y FWCI (OpenAlex los da muy bien)
             return d.get('cited_by_count', 0), d.get('fwci', 'N/A')
     except: pass
-    return 0, 'N/A'
+    return "N/A", "N/A"
 
 def obtener_datos_dimensions(doi):
     url = f"https://metrics-api.dimensions.ai/doi/{doi}"
@@ -21,7 +23,7 @@ def obtener_datos_dimensions(doi):
             d = res.json()
             return d.get('times_cited', 0), d.get('field_citation_ratio', 'N/A')
     except: pass
-    return 0, 'N/A'
+    return "N/A", "N/A"
 
 def obtener_datos_scopus(doi):
     try:
@@ -71,7 +73,7 @@ def obtener_datos_scopus(doi):
 
 # --- INTERFAZ STREAMLIT ---
 
-st.set_page_config(page_title="Evaluador de Investigación", layout="centered")
+st.set_page_config(page_title="Evaluador DOI Profesional", layout="centered")
 st.title("Evaluador de Investigación Profesional 🔬")
 
 doi_input = st.text_input("Introduce el DOI del artículo:", value="10.1126/science.1199644")
@@ -81,20 +83,28 @@ if st.button("Analizar Impacto"):
     
     st.divider()
     
-    # 1. Bloque de Datos (Citas)
+    # 1. Bloque de Datos (Métricas de Citación)
     st.subheader("📊 Impacto de la Aportación")
+    
+    # Obtención de datos
     c_oa, f_oa = obtener_datos_openalex(doi_l)
     c_di, f_di = obtener_datos_dimensions(doi_l)
     dat_sco, stat_sco = obtener_datos_scopus(doi_l)
     
     col1, col2, col3 = st.columns(3)
+    
     with col1:
+        # CORRECCIÓN: Ahora imprimimos correctamente las citas de OpenAlex aquí
+        st.metric("Citas OpenAlex", c_oa)
+        st.caption(f"FWCI: {f_oa}")
+        
+    with col2:
+        # Citas oficiales de Scopus
         st.metric("Citas Scopus", dat_sco['citas'] if stat_sco == 200 else "N/A")
         st.caption(f"Año: {dat_sco['año'] if stat_sco == 200 else '-'}")
-    with col2:
-        st.metric("Citas (OpenAlex)", f_oa)
-        st.metric("FWCI (OpenAlex)", f_oa)
+        
     with col3:
+        # Citas de Dimensions
         st.metric("Citas Dimensions", c_di)
         st.caption(f"FCR: {f_di}")
 
@@ -107,21 +117,20 @@ if st.button("Analizar Impacto"):
             m1.metric(f"SJR ({dat_sco['año']})", dat_sco['sjr'])
             m2.metric(f"CiteScore ({dat_sco['año']})", dat_sco['cs'])
         else:
-            st.warning("🔒 Licencia de API limitada para métricas de revista.")
+            st.warning("🔒 Licencia limitada para métricas de revista.")
     else:
         st.error("No se han podido recuperar datos de Scopus.")
 
-    # 3. Botón FWCI Corregido
+    # 3. Botón FWCI (Búsqueda Exacta)
     st.divider()
     st.write("### Consulta FWCI Oficial")
-    st.write("Para evitar errores 404, usamos el enlace de redirección oficial de Scopus:")
+    st.write("Pulsa para ir directamente a la ficha del artículo en Scopus:")
     
-    # Esta es la URL de redirección universal de Scopus que resuelve el DOI
-    url_scopus_fijo = f"https://www.scopus.com/inward/record.uri?partnerID=HzOxMe3b&scp={doi_l}&origin=inward"
-    # Si falla la anterior, esta es la alternativa directa por DOI
-    url_scopus_alternativa = f"https://www.scopus.com/results/results.uri?txtSearch=DOI({doi_l})&src=s&st1=DOI({doi_l})"
+    # Codificamos el DOI para que la URL sea segura y usamos la sintaxis DOI("...")
+    doi_encoded = urllib.parse.quote(f'DOI("{doi_l}")')
+    url_scopus_exacta = f"https://www.scopus.com/results/results.uri?txtSearch={doi_encoded}&src=s&st1={doi_encoded}"
     
-    st.link_button("🚀 FWCI", url_scopus_alternativa, type="primary")
+    st.link_button("🚀 FWCI", url_scopus_exacta, type="primary")
 
     st.divider()
     st.link_button("🔗 Web original (DOI.org)", f"https://doi.org/{doi_l}")
