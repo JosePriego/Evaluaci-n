@@ -96,7 +96,7 @@ def obtener_datos_scopus(doi):
         
         # ---------------- PASO 2: Buscar Métricas de la Revista ----------------
         # Solo lo intentamos si Scopus nos dio un ISSN y un Año
-        if issn y año_pub:
+        if issn and año_pub:
             url_revista = f"https://api.elsevier.com/content/serial/title/issn/{issn}"
             res_revista = requests.get(url_revista, headers=cabeceras, timeout=10)
             
