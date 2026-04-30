@@ -1,4 +1,4 @@
-import streamlit as st  
+import streamlit as st
 import requests
 
 # --- FUNCIONES DE EXTRACCIÓN ---
@@ -30,95 +30,104 @@ def obtener_datos_scopus(doi):
         return None, "Falta_Clave"
 
     headers = {"X-ELS-APIKey": api_key, "Accept": "application/json"}
-    
-    # 1. Búsqueda estándar (la más compatible)
-    # Limpiamos el DOI de espacios o prefijos raros
-    doi_clean = doi.strip()
-    url_search = f"https://api.elsevier.com/content/search/scopus?query=DOI({doi_clean})"
+    url = f"https://api.elsevier.com/content/search/scopus?query=DOI({doi})"
     
     try:
-        res_search = requests.get(url_search, headers=headers, timeout=15)
-        data = res_search.json()
-        
-        # Guardamos para el inspector pase lo que pase
-        json_debug = data
-        
+        res = requests.get(url, headers=headers, timeout=15)
+        data = res.json()
         entradas = data.get('search-results', {}).get('entry', [])
         
-        # Si no hay resultados o la entrada es un error
         if not entradas or "error" in entradas[0]:
-            return {"json_crudo": json_debug}, 404
+            return None, 404
         
         articulo = entradas[0]
+        año = articulo.get('prism:coverDate', 'N/A').split('-')[0]
+        issn = articulo.get('prism:issn') or articulo.get('prism:eIssn')
         
-        # Datos básicos encontrados
         res_final = {
             "citas": articulo.get('citedby-count', 'N/A'),
-            "año": articulo.get('prism:coverDate', 'N/A').split('-')[0],
-            "issn": articulo.get('prism:issn') or articulo.get('prism:eIssn'),
-            "fwci": "N/A", # Por defecto N/A hasta que lo encontremos
-            "json_crudo": json_debug
+            "año": año,
+            "issn": issn,
+            "sjr": "N/A",
+            "cs": "N/A",
+            "permisos_revista": True
         }
 
-        # 2. INTENTO DE CAZAR EL FWCI (Vía Abstract)
-        # Hacemos una segunda petición específica para métricas detalladas
-        url_abstract = f"https://api.elsevier.com/content/abstract/doi/{doi_clean}?view=META_METRICS"
-        res_abs = requests.get(url_abstract, headers=headers, timeout=10)
-        
-        if res_abs.status_code == 200:
-            data_abs = res_abs.json()
-            # Añadimos este JSON al debug para que lo veas todo
-            res_final["json_crudo_abstract"] = data_abs
-            
-            # Intentamos navegar por la estructura del FWCI en esta vista
-            try:
-                metrics = data_abs.get('abstracts-retrieval-response', {}).get('coredata', {})
-                # A veces el FWCI vive en un campo específico aquí
-                res_final["fwci"] = data_abs.get('abstracts-retrieval-response', {}).get('impactMetrics', {}).get('fieldWeightedCitationImpact', 'N/A')
-            except: pass
+        # Intentamos extraer SJR y CiteScore de la revista
+        if issn:
+            issn_l = str(issn).replace("-", "").strip()
+            url_rev = f"https://api.elsevier.com/content/serial/title/issn/{issn_l}?view=ENHANCED"
+            res_rev = requests.get(url_rev, headers=headers, timeout=10)
+            if res_rev.status_code == 200:
+                d_rev = res_rev.json().get('serial-metadata-response', {}).get('entry', [{}])[0]
+                for s in d_rev.get('SJRList', {}).get('SJR', []):
+                    if str(s.get('@year')) == str(año): res_final["sjr"] = s.get('$')
+                for c in d_rev.get('citeScoreYearInfoList', {}).get('citeScoreYearInfo', []):
+                    if str(c.get('@year')) == str(año): res_final["cs"] = c.get('citeScore')
+            elif res_rev.status_code == 401:
+                res_final["permisos_revista"] = False
 
         return res_final, 200
-    except Exception as e:
-        return None, f"Error: {str(e)}"
+    except: return None, "Error_Conexion"
 
-# --- INTERFAZ ---
+# --- INTERFAZ STREAMLIT ---
 
-st.set_page_config(page_title="Auditoría DOI", layout="wide")
+st.set_page_config(page_title="Evaluador de Investigación", layout="centered")
 st.title("Evaluador de Investigación Profesional 🔬")
 
-doi_input = st.text_input("Introduce el DOI:", value="10.1126/science.1199644")
+doi_input = st.text_input("Introduce el DOI del artículo:", value="10.1126/science.1199644")
 
-if st.button("Ejecutar Auditoría"):
+if st.button("Analizar Impacto"):
     doi_l = doi_input.replace("https://doi.org/", "").strip()
     
     st.divider()
     
-    # Bloque de Datos Abiertos
+    # 1. Bloque de Datos (Métricas de Citación)
+    st.subheader("📊 Impacto de la Aportación")
+    
     c_oa, f_oa = obtener_datos_openalex(doi_l)
     c_di, f_di = obtener_datos_dimensions(doi_l)
+    dat_sco, stat_sco = obtener_datos_scopus(doi_l)
     
-    col1, col2 = st.columns(2)
-    col1.success(f"**OpenAlex**\nCitas: {c_oa} | FWCI: {f_oa}")
-    col2.info(f"**Dimensions**\nCitas: {c_di} | FCR: {f_di}")
-
-    # Bloque Scopus
-    with st.spinner('Consultando Scopus...'):
-        datos, status = obtener_datos_scopus(doi_l)
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Citas Scopus", dat_sco['citas'] if stat_sco == 200 else "N/A")
+        st.caption(f"Año: {dat_sco['año'] if stat_sco == 200 else '-'}")
         
-        if status == 200:
-            st.success(f"**Scopus:** {datos['citas']} citas | **FWCI: {datos['fwci']}** | Año: {datos['año']}")
-            
-            with st.expander("🕵️‍♂️ INSPECTOR DE API"):
-                st.write("Datos de Búsqueda:")
-                st.json(datos.get("json_crudo"))
-                if "json_crudo_abstract" in datos:
-                    st.write("Datos de Métricas Detalladas:")
-                    st.json(datos["json_crudo_abstract"])
+    with col2:
+        # FWCI de OpenAlex como referencia rápida
+        st.metric("FWCI (OpenAlex)", f_oa)
+        st.caption("Referencia abierta")
+        
+    with col3:
+        st.metric("Citas Dimensions", c_di)
+        st.caption(f"FCR: {f_di}")
+
+    # 2. Bloque de Revista (Calidad Editorial)
+    st.divider()
+    st.subheader("🏢 Calidad de la Revista (Scopus)")
+    
+    if stat_sco == 200:
+        if dat_sco["permisos_revista"]:
+            m1, m2 = st.columns(2)
+            m1.metric(f"SJR ({dat_sco['año']})", dat_sco['sjr'])
+            m2.metric(f"CiteScore ({dat_sco['año']})", dat_sco['cs'])
         else:
-            st.error(f"Scopus no devolvió datos para este DOI (Código {status}).")
-            if datos and "json_crudo" in datos:
-                with st.expander("Ver error técnico"):
-                    st.json(datos["json_crudo"])
+            st.warning("🔒 Licencia de API limitada para métricas de revista.")
+            st.info(f"ISSN: {dat_sco['issn']}")
+    else:
+        st.error("No se han podido recuperar datos de Scopus.")
+
+    # 3. Botón FWCI personalizado
+    st.divider()
+    st.write("### Consulta FWCI Oficial")
+    st.write("Dado que la API no entrega el FWCI con tu licencia actual, pulsa el botón para consultarlo directamente en la ficha del artículo:")
+    
+    # Generamos el enlace directo a la ficha de Scopus
+    url_scopus_oficial = f"https://www.scopus.com/record/display.uri?origin=recordpage&doi={doi_l}"
+    st.link_button("🚀 FWCI", url_scopus_oficial, type="primary")
 
     st.divider()
-    st.link_button("🔗 Abrir en Scopus.com", f"https://doi.org/{doi_l}")
+    # Mantenemos el enlace de respaldo a la editorial
+    st.link_button("🔗 Web original del artículo (DOI)", f"https://doi.org/{doi_l}")
