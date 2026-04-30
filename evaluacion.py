@@ -26,38 +26,41 @@ def obtener_datos_dimensions(doi):
 
 def obtener_datos_altmetric(doi):
     """
-    Se conecta a la API de Altmetric con identificación (User-Agent).
-    Devuelve: (score, desglose, código_de_estado_HTTP)
+    Se conecta a la API de Altmetric simulando ser un navegador web (Chrome).
     """
     url = f"https://api.altmetric.com/v1/doi/{doi}"
     
-    # Añadimos cabeceras para identificarnos de forma educada ante el servidor
-    # NOTA: Puedes cambiar el correo por el tuyo propio si lo deseas
+    # CAMBIO CLAVE: Disfrazamos nuestra petición como un navegador Chrome en Windows
     cabeceras = {
-        "User-Agent": "HerramientaEvaluacionDOI/1.0 (mailto:jpriego@uco.es)"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json"
     }
     
-    # Hacemos la petición enviando nuestras cabeceras
-    respuesta = requests.get(url, headers=cabeceras)
-    
-    # Si la petición es exitosa (200)
-    if respuesta.status_code == 200:
-        datos = respuesta.json()
-        score = datos.get('score', 'No disponible')
-        if isinstance(score, (int, float)):
-            score = round(score)
-            
-        desglose = {
-            "X (Twitter)": datos.get('cited_by_tweeters_count', 0),
-            "Noticias": datos.get('cited_by_msm_count', 0),
-            "Wikipedia": datos.get('cited_by_wikipedia_count', 0),
-            "Blogs": datos.get('cited_by_feeds_count', 0),
-            "Facebook": datos.get('cited_by_fbwalls_count', 0)
-        }
-        return score, desglose, respuesta.status_code
+    # Usamos un bloque try-except por si la conexión falla por completo
+    try:
+        # Añadimos un 'timeout' para que la app no se quede colgada si Altmetric tarda
+        respuesta = requests.get(url, headers=cabeceras, timeout=10)
         
-    # Si la petición falla, devolvemos vacíos pero INCLUIMOS el código de error
-    return None, None, respuesta.status_code
+        if respuesta.status_code == 200:
+            datos = respuesta.json()
+            score = datos.get('score', 'No disponible')
+            if isinstance(score, (int, float)):
+                score = round(score)
+                
+            desglose = {
+                "X (Twitter)": datos.get('cited_by_tweeters_count', 0),
+                "Noticias": datos.get('cited_by_msm_count', 0),
+                "Wikipedia": datos.get('cited_by_wikipedia_count', 0),
+                "Blogs": datos.get('cited_by_feeds_count', 0),
+                "Facebook": datos.get('cited_by_fbwalls_count', 0)
+            }
+            return score, desglose, respuesta.status_code
+            
+        return None, None, respuesta.status_code
+        
+    except Exception as e:
+        # Si el servidor rechaza la conexión de tajo, devolvemos un error personalizado
+        return None, None, "Error_Conexion"
 
 # --- INTERFAZ DE USUARIO (STREAMLIT) ---
 
@@ -86,7 +89,7 @@ if st.button("Buscar"):
         else:
             st.error("No se pudo encontrar información en Dimensions para este DOI.")
             
-        # 3. Búsqueda en Altmetric con control de errores (¡NUEVO!)
+        # 3. Búsqueda en Altmetric
         score_alt, desglose_alt, status_alt = obtener_datos_altmetric(doi_limpio)
         
         if score_alt is not None:
@@ -103,15 +106,17 @@ if st.button("Buscar"):
             col5.metric(label="Facebook", value=desglose_alt["Facebook"])
             
         else:
-            # Ahora el código nos explica exactamente por qué ha fallado
+            # Control de errores mejorado
             if status_alt == 404:
-                st.error("Error 404 (No encontrado): Altmetric no tiene registrado este DOI en su base de datos pública de la API, o el formato es incorrecto.")
+                st.error("Error 404: Altmetric no tiene registrado este DOI en su base de datos pública.")
             elif status_alt == 403:
-                st.error("Error 403 (Prohibido): Altmetric está bloqueando la conexión de nuestra aplicación por seguridad.")
+                st.error("Error 403: Altmetric sigue bloqueando la conexión por seguridad.")
             elif status_alt == 429:
-                st.error("Error 429 (Demasiadas peticiones): Hemos superado el límite gratuito de consultas a Altmetric. Inténtalo más tarde.")
+                st.error("Error 429: Hemos superado el límite de peticiones gratuitas. Inténtalo más tarde.")
+            elif status_alt == "Error_Conexion":
+                st.error("Error de conexión: No se pudo contactar con el servidor de Altmetric.")
             else:
-                st.error(f"Error desconocido al conectar con Altmetric. Código de estado HTTP: {status_alt}")
+                st.error(f"Error al conectar con Altmetric. Código HTTP: {status_alt}")
             
     else:
         st.warning("Por favor, introduce un DOI en el cajón de búsqueda.")
