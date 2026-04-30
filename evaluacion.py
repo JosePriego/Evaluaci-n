@@ -10,7 +10,7 @@ def obtener_datos_openalex(doi):
         res = requests.get(url, timeout=10)
         if res.status_code == 200:
             d = res.json()
-            # Extraemos citas y FWCI (OpenAlex los da muy bien)
+            # Extraemos citas y FWCI de OpenAlex
             return d.get('cited_by_count', 0), d.get('fwci', 'N/A')
     except: pass
     return "N/A", "N/A"
@@ -32,6 +32,7 @@ def obtener_datos_scopus(doi):
         return None, "Falta_Clave"
 
     headers = {"X-ELS-APIKey": api_key, "Accept": "application/json"}
+    # Búsqueda exacta por DOI para evitar resultados irrelevantes
     url = f"https://api.elsevier.com/content/search/scopus?query=DOI({doi})"
     
     try:
@@ -55,6 +56,7 @@ def obtener_datos_scopus(doi):
             "permisos_revista": True
         }
 
+        # Extracción de SJR y CiteScore si hay ISSN
         if issn:
             issn_l = str(issn).replace("-", "").strip()
             url_rev = f"https://api.elsevier.com/content/serial/title/issn/{issn_l}?view=ENHANCED"
@@ -86,7 +88,6 @@ if st.button("Analizar Impacto"):
     # 1. Bloque de Datos (Métricas de Citación)
     st.subheader("📊 Impacto de la Aportación")
     
-    # Obtención de datos
     c_oa, f_oa = obtener_datos_openalex(doi_l)
     c_di, f_di = obtener_datos_dimensions(doi_l)
     dat_sco, stat_sco = obtener_datos_scopus(doi_l)
@@ -94,17 +95,14 @@ if st.button("Analizar Impacto"):
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # CORRECCIÓN: Ahora imprimimos correctamente las citas de OpenAlex aquí
         st.metric("Citas OpenAlex", c_oa)
         st.caption(f"FWCI: {f_oa}")
         
     with col2:
-        # Citas oficiales de Scopus
         st.metric("Citas Scopus", dat_sco['citas'] if stat_sco == 200 else "N/A")
         st.caption(f"Año: {dat_sco['año'] if stat_sco == 200 else '-'}")
         
     with col3:
-        # Citas de Dimensions
         st.metric("Citas Dimensions", c_di)
         st.caption(f"FCR: {f_di}")
 
@@ -121,16 +119,13 @@ if st.button("Analizar Impacto"):
     else:
         st.error("No se han podido recuperar datos de Scopus.")
 
-    # 3. Botón FWCI (Búsqueda Exacta)
+    # 3. Enlaces Externos
     st.divider()
-    st.write("### Consulta FWCI Oficial")
-    st.write("Pulsa para ir directamente a la ficha del artículo en Scopus:")
+    st.write("### Enlaces de consulta")
     
-    # Codificamos el DOI para que la URL sea segura y usamos la sintaxis DOI("...")
-    doi_encoded = urllib.parse.quote(f'DOI("{doi_l}")')
-    url_scopus_exacta = f"https://www.scopus.com/results/results.uri?txtSearch={doi_encoded}&src=s&st1={doi_encoded}"
+    # URL de búsqueda exacta en Scopus para consultar el FWCI manualmente
+    doi_query = urllib.parse.quote(f'DOI("{doi_l}")')
+    url_scopus = f"https://www.scopus.com/results/results.uri?txtSearch={doi_query}&src=s&st1={doi_query}"
     
-    st.link_button("🚀 FWCI", url_scopus_exacta, type="primary")
-
-    st.divider()
-    st.link_button("🔗 Web original (DOI.org)", f"https://doi.org/{doi_l}")
+    st.markdown(f"🔗 [Consultar FWCI y detalles en Scopus]({url_scopus})")
+    st.markdown(f"🔗 [Ver web original del artículo (DOI.org)](https://doi.org/{doi_l})")
