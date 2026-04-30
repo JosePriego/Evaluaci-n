@@ -5,6 +5,7 @@ import requests
 # --- DOCUMENTACIÓN DE FUNCIONES ---
 
 def obtener_datos_openalex(doi):
+    """Obtiene citas y FWCI desde OpenAlex (Acceso gratuito)."""
     url = f"https://api.openalex.org/works/doi:{doi}"
     respuesta = requests.get(url)
     if respuesta.status_code == 200:
@@ -15,6 +16,7 @@ def obtener_datos_openalex(doi):
     return None, None
 
 def obtener_datos_dimensions(doi):
+    """Obtiene citas y FCR desde Dimensions (Acceso gratuito)."""
     url = f"https://metrics-api.dimensions.ai/doi/{doi}"
     respuesta = requests.get(url)
     if respuesta.status_code == 200:
@@ -25,6 +27,7 @@ def obtener_datos_dimensions(doi):
     return None, None
 
 def obtener_datos_altmetric(doi):
+    """Obtiene el Altmetric Attention Score simulando un navegador."""
     url = f"https://api.altmetric.com/v1/doi/{doi}"
     cabeceras = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
@@ -46,6 +49,11 @@ def obtener_datos_altmetric(doi):
         return None, None, "Error_Conexion"
 
 def obtener_datos_scopus(doi):
+    """
+    Realiza 2 llamadas a Elsevier:
+    1. Busca el artículo (Citas, Año, ISSN).
+    2. Busca la revista (SJR y CiteScore) manejando errores de licencia (401).
+    """
     try:
         api_key = st.secrets["SCOPUS_API_KEY"]
     except KeyError:
@@ -56,7 +64,7 @@ def obtener_datos_scopus(doi):
         "Accept": "application/json"
     }
     
-    # ---------------- PASO 1: Buscar el Artículo ----------------
+    # --- PASO 1: Buscar el Artículo ---
     url_articulo = f"https://api.elsevier.com/content/search/scopus?query=DOI({doi})"
     try:
         res_articulo = requests.get(url_articulo, headers=cabeceras, timeout=10)
@@ -71,10 +79,7 @@ def obtener_datos_scopus(doi):
             
         articulo = entradas[0]
         citas = articulo.get('citedby-count', 'No disponible')
-        
-        fecha_completa = articulo.get('prism:coverDate', '')
-        año_pub = fecha_completa.split('-')[0] if fecha_completa else None
-        
+        año_pub = articulo.get('prism:coverDate', '').split('-')[0] if articulo.get('prism:coverDate') else None
         issn = articulo.get('prism:issn') or articulo.get('prism:eIssn')
         
         resultados_scopus = {
@@ -83,21 +88,20 @@ def obtener_datos_scopus(doi):
             "issn": issn,
             "sjr_historico": "No disponible",
             "citescore_historico": "No disponible",
-            "debug_json": {} 
+            "permisos_revista": True # Por defecto asumimos que tenemos permisos
         }
         
-        # ---------------- PASO 2: Buscar Métricas de la Revista ----------------
+        # --- PASO 2: Buscar Métricas de la Revista (SJR y CiteScore) ---
         if issn and año_pub:
-            # Aseguramos que el ISSN esté totalmente limpio sin espacios
+            # Limpiamos el guion del ISSN si lo tuviera
             issn_limpio = str(issn).replace("-", "").strip()
+            # Añadimos ?view=ENHANCED para solicitar el historial de métricas
             url_revista = f"https://api.elsevier.com/content/serial/title/issn/{issn_limpio}?view=ENHANCED"
             
             res_revista = requests.get(url_revista, headers=cabeceras, timeout=10)
             
             if res_revista.status_code == 200:
                 datos_revista = res_revista.json()
-                resultados_scopus["debug_json"] = datos_revista 
-                
                 entrada_revista = datos_revista.get('serial-metadata-response', {}).get('entry', [{}])[0]
                 
                 sjr_lista = entrada_revista.get('SJRList', {}).get('SJR', [])
@@ -111,15 +115,9 @@ def obtener_datos_scopus(doi):
                     if str(item.get('@year')) == str(año_pub):
                         resultados_scopus["citescore_historico"] = item.get('citeScore', 'No disponible')
                         break
-            else:
-                # --- NUEVA TRAMPA DE ERRORES ---
-                # Si Elsevier falla, guardamos el motivo exacto para verlo en pantalla
-                resultados_scopus["debug_json"] = {
-                    "Alerta": "Elsevier bloqueó o no encontró la segunda petición (Métricas de Revista)",
-                    "Código HTTP": res_revista.status_code,
-                    "Mensaje del Servidor": res_revista.text,
-                    "URL Intentada": url_revista
-                }
+            elif res_revista.status_code == 401:
+                # Si nuestra API Key no tiene licencia para la Serial Title API, marcamos el error
+                resultados_scopus["permisos_revista"] = False
                         
         return resultados_scopus, 200
         
@@ -168,20 +166,20 @@ if st.button("Buscar Métricas"):
                 if status_scopus == 200 and datos_scopus:
                     st.success(f"**Scopus (Artículo):** La aportación tiene {datos_scopus['citas']} citas | Año de pub: {datos_scopus['año']} | ISSN: {datos_scopus['issn']}")
                     
-                    col1, col2 = st.columns(2)
-                    col1.metric(f"SJR ({datos_scopus['año']})", datos_scopus['sjr_historico'])
-                    col2.metric(f"CiteScore ({datos_scopus['año']})", datos_scopus['citescore_historico'])
-                    st.caption("Nota: El FWCI es una métrica exclusiva de SciVal. Los cuartiles (Q1-Q4) se derivan del rango del SJR/CiteScore.")
+                    # Verificamos si Elsevier nos bloqueó la consulta del SJR
+                    if datos_scopus["permisos_revista"]:
+                        col1, col2 = st.columns(2)
+                        col1.metric(f"SJR ({datos_scopus['año']})", datos_scopus['sjr_historico'])
+                        col2.metric(f"CiteScore ({datos_scopus['año']})", datos_scopus['citescore_historico'])
+                    else:
+                        st.warning("🔒 Tu API Key de Elsevier tiene permisos para buscar artículos, pero carece de autorización institucional (Error 401) para acceder a los datos de métricas de la revista (SJR y CiteScore).")
                     
-                    # --- NUEVO: Panel de Depuración ---
-                    with st.expander("🕵️‍♂️ Modo Depuración: Ver datos internos de Elsevier"):
-                        st.write("Si el SJR o CiteScore dicen 'No disponible', despliega aquí para ver la respuesta real del servidor. Busca si existen las palabras 'SJRList' o 'citeScoreYearInfoList'.")
-                        st.json(datos_scopus.get("debug_json", {}))
+                    st.caption("Nota: El FWCI es una métrica exclusiva de SciVal.")
                 
                 elif status_scopus == "Falta_Clave":
-                    st.error("⚠️ Error de seguridad: No se ha encontrado la clave de Scopus.")
+                    st.error("⚠️ Error de seguridad: No se ha encontrado la clave de Scopus en los Secretos.")
                 elif status_scopus == 401:
-                    st.error("⚠️ Scopus rechazó la clave (Error 401). Verifica tu API Key.")
+                    st.error("⚠️ Scopus rechazó la clave para buscar el artículo (Error 401). Verifica tu API Key.")
                 elif status_scopus == 404:
                     st.warning("Scopus: El DOI no está indexado en su base de datos.")
                 else:
@@ -206,7 +204,7 @@ if st.button("Buscar Métricas"):
         st.write("---")
         st.write("### Consulta Manual en la Revista")
         url_oficial = f"https://doi.org/{doi_limpio}"
-        st.link_button("🔗 Abrir página del artículo", url_oficial)
+        st.link_button("🔗 Abrir página original del artículo", url_oficial)
             
     else:
         st.warning("Por favor, introduce un DOI en el cajón de búsqueda.")
