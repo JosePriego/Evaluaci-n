@@ -53,7 +53,6 @@ def obtener_datos_scopus(doi):
             "permisos_revista": True
         }
 
-        # Intentamos extraer SJR y CiteScore de la revista
         if issn:
             issn_l = str(issn).replace("-", "").strip()
             url_rev = f"https://api.elsevier.com/content/serial/title/issn/{issn_l}?view=ENHANCED"
@@ -82,32 +81,26 @@ if st.button("Analizar Impacto"):
     
     st.divider()
     
-    # 1. Bloque de Datos (Métricas de Citación)
+    # 1. Bloque de Datos (Citas)
     st.subheader("📊 Impacto de la Aportación")
-    
     c_oa, f_oa = obtener_datos_openalex(doi_l)
     c_di, f_di = obtener_datos_dimensions(doi_l)
     dat_sco, stat_sco = obtener_datos_scopus(doi_l)
     
     col1, col2, col3 = st.columns(3)
-    
     with col1:
         st.metric("Citas Scopus", dat_sco['citas'] if stat_sco == 200 else "N/A")
         st.caption(f"Año: {dat_sco['año'] if stat_sco == 200 else '-'}")
-        
     with col2:
-        # FWCI de OpenAlex como referencia rápida
+        st.metric("Citas (OpenAlex)", f_oa)
         st.metric("FWCI (OpenAlex)", f_oa)
-        st.caption("Referencia abierta")
-        
     with col3:
         st.metric("Citas Dimensions", c_di)
         st.caption(f"FCR: {f_di}")
 
-    # 2. Bloque de Revista (Calidad Editorial)
+    # 2. Bloque de Revista
     st.divider()
     st.subheader("🏢 Calidad de la Revista (Scopus)")
-    
     if stat_sco == 200:
         if dat_sco["permisos_revista"]:
             m1, m2 = st.columns(2)
@@ -115,19 +108,20 @@ if st.button("Analizar Impacto"):
             m2.metric(f"CiteScore ({dat_sco['año']})", dat_sco['cs'])
         else:
             st.warning("🔒 Licencia de API limitada para métricas de revista.")
-            st.info(f"ISSN: {dat_sco['issn']}")
     else:
         st.error("No se han podido recuperar datos de Scopus.")
 
-    # 3. Botón FWCI personalizado
+    # 3. Botón FWCI Corregido
     st.divider()
     st.write("### Consulta FWCI Oficial")
-    st.write("Dado que la API no entrega el FWCI con tu licencia actual, pulsa el botón para consultarlo directamente en la ficha del artículo:")
+    st.write("Para evitar errores 404, usamos el enlace de redirección oficial de Scopus:")
     
-    # Generamos el enlace directo a la ficha de Scopus
-    url_scopus_oficial = f"https://www.scopus.com/record/display.uri?origin=recordpage&doi={doi_l}"
-    st.link_button("🚀 FWCI", url_scopus_oficial, type="primary")
+    # Esta es la URL de redirección universal de Scopus que resuelve el DOI
+    url_scopus_fijo = f"https://www.scopus.com/inward/record.uri?partnerID=HzOxMe3b&scp={doi_l}&origin=inward"
+    # Si falla la anterior, esta es la alternativa directa por DOI
+    url_scopus_alternativa = f"https://www.scopus.com/results/results.uri?txtSearch=DOI({doi_l})&src=s&st1=DOI({doi_l})"
+    
+    st.link_button("🚀 FWCI", url_scopus_alternativa, type="primary")
 
     st.divider()
-    # Mantenemos el enlace de respaldo a la editorial
-    st.link_button("🔗 Web original del artículo (DOI)", f"https://doi.org/{doi_l}")
+    st.link_button("🔗 Web original (DOI.org)", f"https://doi.org/{doi_l}")
