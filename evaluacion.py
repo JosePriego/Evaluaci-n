@@ -83,35 +83,43 @@ def obtener_datos_scopus(doi):
             "issn": issn,
             "sjr_historico": "No disponible",
             "citescore_historico": "No disponible",
-            "debug_json": {} # Aquí guardaremos la respuesta cruda para investigar
+            "debug_json": {} 
         }
         
         # ---------------- PASO 2: Buscar Métricas de la Revista ----------------
         if issn and año_pub:
-            # CAMBIO CLAVE: Añadimos ?view=ENHANCED para forzar a que nos dé las métricas
-            url_revista = f"https://api.elsevier.com/content/serial/title/issn/{issn}?view=ENHANCED"
+            # Aseguramos que el ISSN esté totalmente limpio sin espacios
+            issn_limpio = str(issn).replace("-", "").strip()
+            url_revista = f"https://api.elsevier.com/content/serial/title/issn/{issn_limpio}?view=ENHANCED"
+            
             res_revista = requests.get(url_revista, headers=cabeceras, timeout=10)
             
             if res_revista.status_code == 200:
                 datos_revista = res_revista.json()
-                # Guardamos el JSON completo para verlo en la pantalla
                 resultados_scopus["debug_json"] = datos_revista 
                 
                 entrada_revista = datos_revista.get('serial-metadata-response', {}).get('entry', [{}])[0]
                 
-                # Intentamos extraer SJR
                 sjr_lista = entrada_revista.get('SJRList', {}).get('SJR', [])
                 for item in sjr_lista:
                     if str(item.get('@year')) == str(año_pub):
                         resultados_scopus["sjr_historico"] = item.get('$', 'No disponible')
                         break
                         
-                # Intentamos extraer CiteScore
                 cs_lista = entrada_revista.get('citeScoreYearInfoList', {}).get('citeScoreYearInfo', [])
                 for item in cs_lista:
                     if str(item.get('@year')) == str(año_pub):
                         resultados_scopus["citescore_historico"] = item.get('citeScore', 'No disponible')
                         break
+            else:
+                # --- NUEVA TRAMPA DE ERRORES ---
+                # Si Elsevier falla, guardamos el motivo exacto para verlo en pantalla
+                resultados_scopus["debug_json"] = {
+                    "Alerta": "Elsevier bloqueó o no encontró la segunda petición (Métricas de Revista)",
+                    "Código HTTP": res_revista.status_code,
+                    "Mensaje del Servidor": res_revista.text,
+                    "URL Intentada": url_revista
+                }
                         
         return resultados_scopus, 200
         
