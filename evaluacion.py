@@ -100,18 +100,6 @@ if st.button("Analizar Impacto"):
         st.caption(f"FCR: {f_di}")
 
     st.divider()
-    st.subheader("🏢 Calidad de la Revista (Scopus)")
-    if stat_sco == 200:
-        if dat_sco["permisos_revista"]:
-            m1, m2 = st.columns(2)
-            m1.metric(f"SJR ({dat_sco['año']})", dat_sco['sjr'])
-            m2.metric(f"CiteScore ({dat_sco['año']})", dat_sco['cs'])
-        else:
-            st.warning("🔒 Acceso limitado a la Serial Title API (Manual FECYT p.10).")
-    else:
-        st.error("No se han podido recuperar datos de Scopus.")
-
-    st.divider()
     st.write("### Enlaces de consulta")
     doi_query = urllib.parse.quote(f'DOI("{doi_l}")')
     url_scopus = f"https://www.scopus.com/results/results.uri?txtSearch={doi_query}&src=s&st1={doi_query}"
