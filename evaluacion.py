@@ -26,22 +26,27 @@ def obtener_datos_dimensions(doi):
 
 def obtener_datos_altmetric(doi):
     """
-    Se conecta a la API de Altmetric.
-    Ahora devuelve dos cosas: el Score global y un diccionario con el desglose.
+    Se conecta a la API de Altmetric con identificación (User-Agent).
+    Devuelve: (score, desglose, código_de_estado_HTTP)
     """
     url = f"https://api.altmetric.com/v1/doi/{doi}"
-    respuesta = requests.get(url)
     
+    # Añadimos cabeceras para identificarnos de forma educada ante el servidor
+    # NOTA: Puedes cambiar el correo por el tuyo propio si lo deseas
+    cabeceras = {
+        "User-Agent": "HerramientaEvaluacionDOI/1.0 (mailto:tu_correo@ejemplo.com)"
+    }
+    
+    # Hacemos la petición enviando nuestras cabeceras
+    respuesta = requests.get(url, headers=cabeceras)
+    
+    # Si la petición es exitosa (200)
     if respuesta.status_code == 200:
         datos = respuesta.json()
-        
-        # 1. Extraemos el score global
         score = datos.get('score', 'No disponible')
         if isinstance(score, (int, float)):
             score = round(score)
             
-        # 2. NUEVO: Extraemos el desglose exacto
-        # Usamos .get(clave, 0) para que si la plataforma no menciona el artículo, devuelva un 0.
         desglose = {
             "X (Twitter)": datos.get('cited_by_tweeters_count', 0),
             "Noticias": datos.get('cited_by_msm_count', 0),
@@ -49,10 +54,10 @@ def obtener_datos_altmetric(doi):
             "Blogs": datos.get('cited_by_feeds_count', 0),
             "Facebook": datos.get('cited_by_fbwalls_count', 0)
         }
+        return score, desglose, respuesta.status_code
         
-        return score, desglose
-        
-    return None, None
+    # Si la petición falla, devolvemos vacíos pero INCLUIMOS el código de error
+    return None, None, respuesta.status_code
 
 # --- INTERFAZ DE USUARIO (STREAMLIT) ---
 
@@ -81,28 +86,32 @@ if st.button("Buscar"):
         else:
             st.error("No se pudo encontrar información en Dimensions para este DOI.")
             
-        # 3. Búsqueda en Altmetric con desglose (¡NUEVO!)
-        score_alt, desglose_alt = obtener_datos_altmetric(doi_limpio)
+        # 3. Búsqueda en Altmetric con control de errores (¡NUEVO!)
+        score_alt, desglose_alt, status_alt = obtener_datos_altmetric(doi_limpio)
+        
         if score_alt is not None:
             st.warning(f"Para Altmetric: La aportación tiene un Altmetric Attention Score de {score_alt}")
-            
-            # --- NUEVA VISUALIZACIÓN EN COLUMNAS ---
             st.write("**Desglose de menciones sociales:**")
             
-            # Creamos 3 columnas para organizar los datos de forma limpia
             col1, col2, col3 = st.columns(3)
-            # st.metric es un componente de Streamlit que muestra números grandes y atractivos
             col1.metric(label="X (Twitter)", value=desglose_alt["X (Twitter)"])
             col2.metric(label="Noticias", value=desglose_alt["Noticias"])
             col3.metric(label="Wikipedia", value=desglose_alt["Wikipedia"])
             
-            # Creamos 2 columnas más para la siguiente fila
             col4, col5 = st.columns(2)
             col4.metric(label="Blogs", value=desglose_alt["Blogs"])
             col5.metric(label="Facebook", value=desglose_alt["Facebook"])
             
         else:
-            st.error("No se pudo encontrar información de impacto social en Altmetric para este DOI.")
+            # Ahora el código nos explica exactamente por qué ha fallado
+            if status_alt == 404:
+                st.error("Error 404 (No encontrado): Altmetric no tiene registrado este DOI en su base de datos pública de la API, o el formato es incorrecto.")
+            elif status_alt == 403:
+                st.error("Error 403 (Prohibido): Altmetric está bloqueando la conexión de nuestra aplicación por seguridad.")
+            elif status_alt == 429:
+                st.error("Error 429 (Demasiadas peticiones): Hemos superado el límite gratuito de consultas a Altmetric. Inténtalo más tarde.")
+            else:
+                st.error(f"Error desconocido al conectar con Altmetric. Código de estado HTTP: {status_alt}")
             
     else:
         st.warning("Por favor, introduce un DOI en el cajón de búsqueda.")
