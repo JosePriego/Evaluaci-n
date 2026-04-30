@@ -51,7 +51,7 @@ def obtener_datos_altmetric(doi):
 def obtener_datos_scopus(doi):
     """
     Realiza 2 llamadas a Elsevier:
-    1. Busca el artículo (Citas, Año, ISSN).
+    1. Busca el artículo (Citas, FWCI, Año, ISSN).
     2. Busca la revista (SJR y CiteScore) manejando errores de licencia (401).
     """
     try:
@@ -82,20 +82,24 @@ def obtener_datos_scopus(doi):
         año_pub = articulo.get('prism:coverDate', '').split('-')[0] if articulo.get('prism:coverDate') else None
         issn = articulo.get('prism:issn') or articulo.get('prism:eIssn')
         
+        # --- NUEVO: Extracción del FWCI ---
+        fwci = articulo.get('fwci', 'N/A')
+        if fwci == 'N/A':
+            fwci = articulo.get('fieldWeightedCitationImpact', 'N/A')
+        
         resultados_scopus = {
             "citas": citas,
             "año": año_pub,
             "issn": issn,
+            "fwci": fwci, # Añadido el FWCI
             "sjr_historico": "No disponible",
             "citescore_historico": "No disponible",
-            "permisos_revista": True # Por defecto asumimos que tenemos permisos
+            "permisos_revista": True 
         }
         
         # --- PASO 2: Buscar Métricas de la Revista (SJR y CiteScore) ---
         if issn and año_pub:
-            # Limpiamos el guion del ISSN si lo tuviera
             issn_limpio = str(issn).replace("-", "").strip()
-            # Añadimos ?view=ENHANCED para solicitar el historial de métricas
             url_revista = f"https://api.elsevier.com/content/serial/title/issn/{issn_limpio}?view=ENHANCED"
             
             res_revista = requests.get(url_revista, headers=cabeceras, timeout=10)
@@ -116,7 +120,6 @@ def obtener_datos_scopus(doi):
                         resultados_scopus["citescore_historico"] = item.get('citeScore', 'No disponible')
                         break
             elif res_revista.status_code == 401:
-                # Si nuestra API Key no tiene licencia para la Serial Title API, marcamos el error
                 resultados_scopus["permisos_revista"] = False
                         
         return resultados_scopus, 200
@@ -164,17 +167,15 @@ if st.button("Buscar Métricas"):
                 datos_scopus, status_scopus = obtener_datos_scopus(doi_limpio)
                 
                 if status_scopus == 200 and datos_scopus:
-                    st.success(f"**Scopus (Artículo):** La aportación tiene {datos_scopus['citas']} citas | Año de pub: {datos_scopus['año']} | ISSN: {datos_scopus['issn']}")
+                    # NUEVO: Mostramos el FWCI directamente en el mensaje principal
+                    st.success(f"**Scopus (Artículo):** La aportación tiene {datos_scopus['citas']} citas | FWCI: {datos_scopus['fwci']} | Año de pub: {datos_scopus['año']} | ISSN: {datos_scopus['issn']}")
                     
-                    # Verificamos si Elsevier nos bloqueó la consulta del SJR
                     if datos_scopus["permisos_revista"]:
                         col1, col2 = st.columns(2)
                         col1.metric(f"SJR ({datos_scopus['año']})", datos_scopus['sjr_historico'])
                         col2.metric(f"CiteScore ({datos_scopus['año']})", datos_scopus['citescore_historico'])
                     else:
                         st.warning("🔒 Tu API Key de Elsevier tiene permisos para buscar artículos, pero carece de autorización institucional (Error 401) para acceder a los datos de métricas de la revista (SJR y CiteScore).")
-                    
-                    st.caption("Nota: El FWCI es una métrica exclusiva de SciVal.")
                 
                 elif status_scopus == "Falta_Clave":
                     st.error("⚠️ Error de seguridad: No se ha encontrado la clave de Scopus en los Secretos.")
