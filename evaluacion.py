@@ -25,22 +25,14 @@ def obtener_datos_dimensions(doi):
     return None, None
 
 def obtener_datos_altmetric(doi):
-    """
-    Se conecta a la API de Altmetric simulando ser un navegador web (Chrome).
-    """
     url = f"https://api.altmetric.com/v1/doi/{doi}"
-    
-    # CAMBIO CLAVE: Disfrazamos nuestra petición como un navegador Chrome en Windows
     cabeceras = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json"
     }
     
-    # Usamos un bloque try-except por si la conexión falla por completo
     try:
-        # Añadimos un 'timeout' para que la app no se quede colgada si Altmetric tarda
         respuesta = requests.get(url, headers=cabeceras, timeout=10)
-        
         if respuesta.status_code == 200:
             datos = respuesta.json()
             score = datos.get('score', 'No disponible')
@@ -59,15 +51,17 @@ def obtener_datos_altmetric(doi):
         return None, None, respuesta.status_code
         
     except Exception as e:
-        # Si el servidor rechaza la conexión de tajo, devolvemos un error personalizado
         return None, None, "Error_Conexion"
 
 # --- INTERFAZ DE USUARIO (STREAMLIT) ---
 
 st.title("Evaluador de Investigación por DOI 🔬")
-st.write("Introduce el DOI de un artículo para extraer su impacto académico y social detallado.")
+st.write("Introduce el DOI de un artículo para extraer su impacto académico.")
 
 doi_input = st.text_input("Introduce el DOI (ejemplo: 10.1038/s41586-020-2649-2):")
+
+# NUEVO: Casilla de verificación. Devuelve Verdadero o Falso.
+usar_altmetric = st.checkbox("Intentar obtener datos de impacto social (Altmetric)")
 
 if st.button("Buscar"):
     if doi_input:
@@ -89,34 +83,27 @@ if st.button("Buscar"):
         else:
             st.error("No se pudo encontrar información en Dimensions para este DOI.")
             
-        # 3. Búsqueda en Altmetric
-        score_alt, desglose_alt, status_alt = obtener_datos_altmetric(doi_limpio)
-        
-        if score_alt is not None:
-            st.warning(f"Para Altmetric: La aportación tiene un Altmetric Attention Score de {score_alt}")
-            st.write("**Desglose de menciones sociales:**")
+        # 3. Búsqueda en Altmetric (Solo se ejecuta si la casilla está marcada)
+        if usar_altmetric:
+            score_alt, desglose_alt, status_alt = obtener_datos_altmetric(doi_limpio)
             
-            col1, col2, col3 = st.columns(3)
-            col1.metric(label="X (Twitter)", value=desglose_alt["X (Twitter)"])
-            col2.metric(label="Noticias", value=desglose_alt["Noticias"])
-            col3.metric(label="Wikipedia", value=desglose_alt["Wikipedia"])
-            
-            col4, col5 = st.columns(2)
-            col4.metric(label="Blogs", value=desglose_alt["Blogs"])
-            col5.metric(label="Facebook", value=desglose_alt["Facebook"])
-            
-        else:
-            # Control de errores mejorado
-            if status_alt == 404:
-                st.error("Error 404: Altmetric no tiene registrado este DOI en su base de datos pública.")
-            elif status_alt == 403:
-                st.error("Error 403: Altmetric sigue bloqueando la conexión por seguridad.")
-            elif status_alt == 429:
-                st.error("Error 429: Hemos superado el límite de peticiones gratuitas. Inténtalo más tarde.")
-            elif status_alt == "Error_Conexion":
-                st.error("Error de conexión: No se pudo contactar con el servidor de Altmetric.")
+            if score_alt is not None:
+                st.warning(f"Para Altmetric: La aportación tiene un Altmetric Attention Score de {score_alt}")
+                st.write("**Desglose de menciones sociales:**")
+                col1, col2, col3 = st.columns(3)
+                col1.metric(label="X (Twitter)", value=desglose_alt["X (Twitter)"])
+                col2.metric(label="Noticias", value=desglose_alt["Noticias"])
+                col3.metric(label="Wikipedia", value=desglose_alt["Wikipedia"])
+                col4, col5 = st.columns(2)
+                col4.metric(label="Blogs", value=desglose_alt["Blogs"])
+                col5.metric(label="Facebook", value=desglose_alt["Facebook"])
             else:
-                st.error(f"Error al conectar con Altmetric. Código HTTP: {status_alt}")
+                if status_alt == 404:
+                    st.error("Error 404: Altmetric no tiene registrado este DOI en su base de datos.")
+                elif status_alt == 403:
+                    st.warning("⚠️ Altmetric ha bloqueado la conexión desde la nube por seguridad.")
+                else:
+                    st.error(f"Error al conectar con Altmetric. Código HTTP: {status_alt}")
             
     else:
         st.warning("Por favor, introduce un DOI en el cajón de búsqueda.")
