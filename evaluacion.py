@@ -31,12 +31,6 @@ def obtener_datos_altmetric(doi):
     except: return None
 
 def obtener_datos_scopus(doi):
-    """
-    Estrategia híbrida:
-    1. Busca datos básicos (Citas, ISSN, Año).
-    2. Intenta obtener el FWCI desde el endpoint de métricas.
-    3. Intenta obtener SJR/CiteScore de la revista.
-    """
     try:
         api_key = st.secrets["SCOPUS_API_KEY"]
     except:
@@ -44,48 +38,45 @@ def obtener_datos_scopus(doi):
 
     headers = {"X-ELS-APIKey": api_key, "Accept": "application/json"}
     
-    # --- PASO 1: Datos Básicos del Artículo ---
+    # 1. Búsqueda del artículo
     url_search = f"https://api.elsevier.com/content/search/scopus?query=DOI({doi})"
     try:
         res_search = requests.get(url_search, headers=headers, timeout=10)
-        if res_search.status_code != 200: return None, f"Error API Search: {res_search.status_code}"
+        if res_search.status_code != 200: return None, res_search.status_code
         
         data_s = res_search.json()
-        entry = data_s.get('search-results', {}).get('entry', [])[0] if data_s.get('search-results', {}).get('entry') else None
-        if not entry: return None, 404
+        entradas = data_s.get('search-results', {}).get('entry', [])
+        if not entradas: return None, 404
+        
+        entry = entradas[0]
 
+        # --- AQUÍ ESTÁ LA CORRECCIÓN QUE HAS DETECTADO ---
         res_final = {
-            "citas": entry.get('citedby-count', 0),
+            "citas": entry.get('citedby-count', 'N/A'),
             "año": entry.get('prism:coverDate', '').split('-')[0],
             "issn": entry.get('prism:issn') or entry.get('prism:eIssn'),
-            "fwci": "N/A",
+            # Intentamos capturar el FWCI directamente del entry
+            "fwci": entry.get('fieldWeightedCitationImpact', 'N/A'), 
             "sjr": "N/A",
             "cs": "N/A",
             "permisos_revista": True
         }
 
-        # --- PASO 2: EL "TRUCO" PARA EL FWCI ---
-        # Intentamos el endpoint de Metrics que es menos restrictivo que el de Abstract
-        url_metrics = f"https://api.elsevier.com/content/abstract/citations?doi={doi}"
-        res_met = requests.get(url_metrics, headers=headers, timeout=10)
-        if res_met.status_code == 200:
-            # Si responde, buscamos el valor de impacto ponderado
-            d_met = res_met.json()
-            # A veces viene en una estructura llamada 'citation-count-response'
-            # Si no lo encontramos aquí, nos quedamos con el N/A
-            pass 
-
-        # --- PASO 3: Métricas de la Revista ---
+        # 2. Búsqueda de métricas de la revista
         if res_final["issn"]:
-            issn_l = res_final["issn"].replace("-", "")
+            issn_l = res_final["issn"].replace("-", "").strip()
             url_rev = f"https://api.elsevier.com/content/serial/title/issn/{issn_l}?view=ENHANCED"
             res_rev = requests.get(url_rev, headers=headers, timeout=10)
             if res_rev.status_code == 200:
                 d_rev = res_rev.json().get('serial-metadata-response', {}).get('entry', [{}])[0]
+                # Extraer SJR del año correspondiente
                 for s in d_rev.get('SJRList', {}).get('SJR', []):
-                    if s.get('@year') == res_final["año"]: res_final["sjr"] = s.get('$')
+                    if str(s.get('@year')) == str(res_final["año"]): 
+                        res_final["sjr"] = s.get('$')
+                # Extraer CiteScore del año correspondiente
                 for c in d_rev.get('citeScoreYearInfoList', {}).get('citeScoreYearInfo', []):
-                    if c.get('@year') == res_final["año"]: res_final["cs"] = c.get('citeScore')
+                    if str(c.get('@year')) == str(res_final["año"]): 
+                        res_final["cs"] = c.get('citeScore')
             elif res_rev.status_code == 401:
                 res_final["permisos_revista"] = False
 
@@ -101,7 +92,7 @@ doi_input = st.text_input("Introduce el DOI:", value="10.1126/science.1199644")
 if st.button("Buscar Métricas"):
     doi_l = doi_input.replace("https://doi.org/", "").strip()
     
-    # Columnas para métricas rápidas
+    st.subheader("Impacto en Bases de Datos:")
     c1, c2 = st.columns(2)
     
     # OpenAlex
@@ -122,7 +113,7 @@ if st.button("Buscar Métricas"):
                 m1.metric(f"SJR ({dat['año']})", dat['sjr'])
                 m2.metric(f"CiteScore ({dat['año']})", dat['cs'])
             else:
-                st.warning("🔒 Sin permiso para métricas de revista (SJR/CS).")
+                st.warning("🔒 Tu licencia no permite ver métricas de revista (SJR/CS).")
         else:
             st.error(f"Error Scopus: {status}")
 
