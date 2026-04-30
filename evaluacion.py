@@ -34,7 +34,7 @@ def obtener_datos_altmetric(doi):
     # Añadimos cabeceras para identificarnos de forma educada ante el servidor
     # NOTA: Puedes cambiar el correo por el tuyo propio si lo deseas
     cabeceras = {
-        "User-Agent": "HerramientaEvaluacionDOI/1.0 (mailto:tu_correo@ejemplo.com)"
+        "User-Agent": "HerramientaEvaluacionDOI/1.0 (mailto:jpriego@uco.es)"
     }
     
     # Hacemos la petición enviando nuestras cabeceras
