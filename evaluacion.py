@@ -54,7 +54,6 @@ def obtener_datos_scopus(doi):
             "permisos_revista": True
         }
 
-        # Según el manual FECYT: Serial Title API + view=ENHANCED
         if issn:
             issn_l = str(issn).replace("-", "").strip()
             url_rev = f"https://api.elsevier.com/content/serial/title/issn/{issn_l}?view=ENHANCED"
@@ -73,7 +72,7 @@ def obtener_datos_scopus(doi):
 
 # --- INTERFAZ STREAMLIT ---
 
-st.set_page_config(page_title="Evaluador DOI Profesional", layout="centered")
+st.set_page_config(page_title="Evaluador de Investigación", layout="wide")
 st.title("Evaluador de Investigación Profesional 🔬")
 
 doi_input = st.text_input("Introduce el DOI del artículo:", value="10.1126/science.1199644")
@@ -81,28 +80,71 @@ doi_input = st.text_input("Introduce el DOI del artículo:", value="10.1126/scie
 if st.button("Analizar Impacto"):
     doi_l = doi_input.replace("https://doi.org/", "").strip()
     
-    st.divider()
+    # 1. BLOQUE: IMPACTO DE LA APORTACIÓN
+    st.header("📊 Impacto de la Aportación")
     
-    st.subheader("📊 Impacto de la Aportación")
+    # Obtención de datos
     c_oa, f_oa = obtener_datos_openalex(doi_l)
-    c_di, f_di = obtener_datos_dimensions(doi_l)
     dat_sco, stat_sco = obtener_datos_scopus(doi_l)
+    c_di, f_di = obtener_datos_dimensions(doi_l)
     
     col1, col2, col3 = st.columns(3)
+    
     with col1:
-        st.metric("Citas OpenAlex", c_oa)
-        st.caption(f"FWCI: {f_oa}")
-    with col2:
-        st.metric("Citas Scopus", dat_sco['citas'] if stat_sco == 200 else "N/A")
-        st.caption(f"Año: {dat_sco['año'] if stat_sco == 200 else '-'}")
-    with col3:
-        st.metric("Citas Dimensions", c_di)
-        st.caption(f"FCR: {f_di}")
+        st.subheader("Scopus")
+        st.metric("Citas", dat_sco['citas'] if stat_sco == 200 else "N/A")
+        st.write(f"**Año:** {dat_sco['año'] if stat_sco == 200 else 'N/A'}")
+        st.caption("Fuente oficial Elsevier")
 
+    with col2:
+        st.subheader("Dimensions")
+        st.metric("Citas", c_di)
+        st.write(f"**FCR:** {f_di}")
+        st.caption("Field Citation Ratio")
+
+    with col3:
+        st.subheader("OpenAlex")
+        st.metric("Citas", c_oa)
+        st.write(f"**FWCI:** {f_oa}")
+        st.caption("Field Weighted Citation Impact")
+
+    # 2. BLOQUE: CALIDAD EDITORIAL (REVISTA)
     st.divider()
-    st.write("### Enlaces de consulta")
+    st.header("🏢 Calidad de la Revista")
+    
+    if stat_sco == 200:
+        if dat_sco["permisos_revista"]:
+            m1, m2 = st.columns(2)
+            m1.metric(f"SJR ({dat_sco['año']})", dat_sco['sjr'])
+            m2.metric(f"CiteScore ({dat_sco['año']})", dat_sco['cs'])
+        else:
+            st.warning("🔒 Licencia de API limitada: Consulta el SJR/CiteScore manualmente en los enlaces inferiores.")
+            st.info(f"ISSN: {dat_sco['issn']}")
+    else:
+        st.error("No se pudo recuperar información de la revista desde Scopus.")
+
+    # 3. BLOQUE: ENLACES DE CONSULTA
+    st.divider()
+    st.header("🔗 Enlaces de Consulta")
+    
+    # Preparar URLs
     doi_query = urllib.parse.quote(f'DOI("{doi_l}")')
     url_scopus = f"https://www.scopus.com/results/results.uri?txtSearch={doi_query}&src=s&st1={doi_query}"
+    url_wos = f"https://www.webofscience.com/wos/woscc/basic-search?query={doi_l}"
     
-    st.markdown(f"🔗 [Consultar FWCI y métricas en Scopus.com]({url_scopus})")
-    st.markdown(f"🔗 [Ver web original del artículo (DOI.org)](https://doi.org/{doi_l})")
+    c_enlace1, c_enlace2, c_enlace3 = st.columns(3)
+    
+    with c_enlace1:
+        st.markdown(f"**Scopus Oficial**")
+        st.write("Para consultar el FWCI real, percentiles y métricas detalladas.")
+        st.link_button("Ir a Scopus", url_scopus)
+
+    with c_enlace2:
+        st.markdown(f"**Web of Science**")
+        st.write("Consulta manual en WoS y JCR (requiere estar en red VPN/Uni).")
+        st.link_button("Ir a WoS", url_wos)
+
+    with c_enlace3:
+        st.markdown(f"**Página del Artículo**")
+        st.write("Enlace directo a la web original de la editorial (vía DOI).")
+        st.link_button("Ir al DOI", f"https://doi.org/{doi_l}")
